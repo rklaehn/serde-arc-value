@@ -2,6 +2,7 @@ use serde::ser;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
 use Value;
 
@@ -265,7 +266,7 @@ impl ser::SerializeSeq for SerializeSeq {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Seq(self.0))
+        Ok(Value::Seq(Arc::new(self.0)))
     }
 }
 
@@ -288,7 +289,7 @@ impl ser::SerializeTuple for SerializeTuple {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Seq(self.0))
+        Ok(Value::Seq(Arc::new(self.0)))
     }
 }
 
@@ -311,7 +312,7 @@ impl ser::SerializeTupleStruct for SerializeTupleStruct {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Seq(self.0))
+        Ok(Value::Seq(Arc::new(self.0)))
     }
 }
 
@@ -334,7 +335,7 @@ impl ser::SerializeTupleVariant for SerializeTupleVariant {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Seq(self.0))
+        Ok(Value::Seq(Arc::new(self.0)))
     }
 }
 
@@ -369,7 +370,7 @@ impl ser::SerializeMap for SerializeMap {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Map(self.map))
+        Ok(Value::Map(Arc::new(self.map)))
     }
 }
 
@@ -394,7 +395,7 @@ impl ser::SerializeStruct for SerializeStruct {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Map(self.0))
+        Ok(Value::Map(Arc::new(self.0)))
     }
 }
 
@@ -419,6 +420,6 @@ impl ser::SerializeStructVariant for SerializeStructVariant {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Map(self.0))
+        Ok(Value::Map(Arc::new(self.0)))
     }
 }

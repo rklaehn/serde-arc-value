@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use Value;
 
@@ -271,7 +272,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         while let Some(elem) = try!(visitor.next_element()) {
             values.push(elem);
         }
-        Ok(Value::Seq(values))
+        Ok(Value::Seq(Arc::new(values)))
     }
 
     fn visit_map<V: de::MapAccess<'de>>(self, mut visitor: V) -> Result<Value, V::Error> {
@@ -279,7 +280,7 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
         while let Some((key, value)) = try!(visitor.next_entry()) {
             values.insert(key, value);
         }
-        Ok(Value::Map(values))
+        Ok(Value::Map(Arc::new(values)))
     }
 
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Value, E> {
@@ -346,10 +347,10 @@ impl<'de, E> de::Deserializer<'de> for ValueDeserializer<E> where E: de::Error {
             Value::Option(Some(v)) => visitor.visit_some(ValueDeserializer::new(*v)),
             Value::Newtype(v) => visitor.visit_newtype_struct(ValueDeserializer::new(*v)),
             Value::Seq(v) => {
-                visitor.visit_seq(de::value::SeqDeserializer::new(v.into_iter().map(ValueDeserializer::new)))
+                visitor.visit_seq(de::value::SeqDeserializer::new(v.as_ref().clone().into_iter().map(ValueDeserializer::new)))
             },
             Value::Map(v) => {
-                visitor.visit_map(de::value::MapDeserializer::new(v.into_iter().map(|(k, v)| (
+                visitor.visit_map(de::value::MapDeserializer::new(v.as_ref().clone().into_iter().map(|(k, v)| (
                     ValueDeserializer::new(k),
                     ValueDeserializer::new(v),
                 ))))
@@ -373,7 +374,7 @@ impl<'de, E> de::Deserializer<'de> for ValueDeserializer<E> where E: de::Error {
                                              -> Result<V::Value, Self::Error> {
         let (variant, value) = match self.value {
             Value::Map(value) => {
-                let mut iter = value.into_iter();
+                let mut iter = value.as_ref().clone().into_iter();
                 let (variant, value) = match iter.next() {
                     Some(v) => v,
                     None => {
@@ -511,7 +512,7 @@ impl<'de, E> de::VariantAccess<'de> for VariantDeserializer<E> where E: de::Erro
         match self.value {
             Some(Value::Seq(v)) => {
                 de::Deserializer::deserialize_any(
-                    de::value::SeqDeserializer::new(v.into_iter().map(ValueDeserializer::new)),
+                    de::value::SeqDeserializer::new(v.as_ref().clone().into_iter().map(ValueDeserializer::new)),
                     visitor)
             }
             Some(other) => Err(de::Error::invalid_type(other.unexpected(), &"tuple variant")),
@@ -528,7 +529,7 @@ impl<'de, E> de::VariantAccess<'de> for VariantDeserializer<E> where E: de::Erro
         match self.value {
             Some(Value::Map(v)) => {
                 de::Deserializer::deserialize_any(
-                    de::value::MapDeserializer::new(v.into_iter().map(|(k, v)| (
+                    de::value::MapDeserializer::new(v.as_ref().clone().into_iter().map(|(k, v)| (
                         ValueDeserializer::new(k),
                         ValueDeserializer::new(v),
                     ))),

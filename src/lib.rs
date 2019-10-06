@@ -13,6 +13,7 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use serde::Deserialize;
 use ordered_float::OrderedFloat;
+use std::sync::Arc;
 
 pub use de::*;
 pub use ser::*;
@@ -43,8 +44,8 @@ pub enum Value {
     Unit,
     Option(Option<Box<Value>>),
     Newtype(Box<Value>),
-    Seq(Vec<Value>),
-    Map(BTreeMap<Value, Value>),
+    Seq(Arc<Vec<Value>>),
+    Map(Arc<BTreeMap<Value, Value>>),
     Bytes(Vec<u8>),
 }
 
@@ -196,18 +197,18 @@ impl PartialOrd for Value {
 #[test]
 fn de_smoke_test() {
     // some convoluted Value
-    let value = Value::Option(Some(Box::new(Value::Seq(vec![
+    let value = Value::Option(Some(Box::new(Value::Seq(Arc::new(vec![
         Value::U16(8),
         Value::Char('a'),
         Value::F32(1.0),
         Value::String("hello".into()),
-        Value::Map(vec![
+        Value::Map(Arc::new(vec![
             (Value::Bool(false), Value::Unit),
             (Value::Bool(true), Value::Newtype(Box::new(
                 Value::Bytes(b"hi".as_ref().into())
             ))),
-        ].into_iter().collect()),
-    ]))));
+        ].into_iter().collect())),
+    ])))));
 
     // assert that the value remains unchanged through deserialization
     let value_de = Value::deserialize(value.clone()).unwrap();
@@ -229,11 +230,11 @@ fn ser_smoke_test() {
         c: vec![true, false],
     };
 
-    let expected = Value::Map(vec![
+    let expected = Value::Map(Arc::new(vec![
         (Value::String("a".into()), Value::U32(15)),
         (Value::String("b".into()), Value::String("hello".into())),
-        (Value::String("c".into()), Value::Seq(vec![Value::Bool(true), Value::Bool(false)])),
-    ].into_iter().collect());
+        (Value::String("c".into()), Value::Seq(Arc::new(vec![Value::Bool(true), Value::Bool(false)]))),
+    ].into_iter().collect()));
 
     let value = to_value(&foo).unwrap();
     assert_eq!(expected, value);
@@ -250,9 +251,9 @@ fn deserialize_into_enum() {
     let value = Value::String("Bar".into());
     assert_eq!(Foo::deserialize(value).unwrap(), Foo::Bar);
 
-    let value = Value::Map(vec![
+    let value = Value::Map(Arc::new(vec![
         (Value::String("Baz".into()), Value::U8(1))
-    ].into_iter().collect());
+    ].into_iter().collect()));
     assert_eq!(Foo::deserialize(value).unwrap(), Foo::Baz(1));
 }
 
@@ -286,24 +287,24 @@ fn deserialize_inside_deserialize_impl() {
         }
     }
 
-    let input = Value::Map(vec![
+    let input = Value::Map(Arc::new(vec![
         (Value::String("kind".to_owned()), Value::String("ADDED".to_owned())),
         (Value::String("object".to_owned()), Value::U32(5)),
-    ].into_iter().collect());
+    ].into_iter().collect()));
     let event = Event::deserialize(input).expect("could not deserialize ADDED event");
     assert_eq!(event, Event::Added(5));
 
-    let input = Value::Map(vec![
+    let input = Value::Map(Arc::new(vec![
         (Value::String("kind".to_owned()), Value::String("ERROR".to_owned())),
         (Value::String("object".to_owned()), Value::U8(5)),
-    ].into_iter().collect());
+    ].into_iter().collect()));
     let event = Event::deserialize(input).expect("could not deserialize ERROR event");
     assert_eq!(event, Event::Error(5));
 
-    let input = Value::Map(vec![
+    let input = Value::Map(Arc::new(vec![
         (Value::String("kind".to_owned()), Value::String("ADDED".to_owned())),
         (Value::String("object".to_owned()), Value::Unit),
-    ].into_iter().collect());
+    ].into_iter().collect()));
     let _ = Event::deserialize(input).expect_err("expected deserializing bad ADDED event to fail");
 }
 
@@ -327,9 +328,9 @@ fn deserialize_newtype2() {
         foo: Foo,
     }
 
-    let input = Value::Map(vec![
+    let input = Value::Map(Arc::new(vec![
         (Value::String("foo".to_owned()), Value::I32(5))
-    ].into_iter().collect());
+    ].into_iter().collect()));
     let bar = Bar::deserialize(input).unwrap();
     assert_eq!(bar, Bar { foo: Foo(5) });
 }
