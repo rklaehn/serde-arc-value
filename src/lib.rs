@@ -45,7 +45,7 @@ pub enum Value {
     Newtype(Box<Value>),
 
     // complex, possibly shared, values
-    String(Arc<Vec<u8>>),
+    String(Arc<String>),
     Bytes(Arc<Vec<u8>>),
     Seq(Arc<Vec<Value>>),
     Map(Arc<KV>),
@@ -58,7 +58,7 @@ pub trait Deduplicator {
 #[derive(Clone, Debug)]
 pub struct Dedup {
     blobs: HashSet<Arc<Vec<u8>>>,
-    strings: HashSet<Arc<Vec<u8>>>,
+    strings: HashSet<Arc<String>>,
     vectors: HashSet<Arc<Vec<Value>>>,
     objects: HashSet<Arc<KV>>,
 }
@@ -77,7 +77,17 @@ impl Dedup {
         vec.into_iter().map(|x| self.dedup(x)).collect()
     }
 
-    fn dedup_bytes(&mut self, value: Arc<Vec<u8>>) -> Arc<Vec<u8>> {
+    fn dedup_blob(&mut self, value: Arc<Vec<u8>>) -> Arc<Vec<u8>> {
+        match self.blobs.get(value.as_ref()) {
+            Some(value) => value.clone(),
+            None => {
+                self.blobs.insert(value.clone());
+                value
+            }
+        }
+    }
+
+    fn dedup_string(&mut self, value: Arc<String>) -> Arc<String> {
         match self.strings.get(value.as_ref()) {
             Some(value) => value.clone(),
             None => {
@@ -111,8 +121,8 @@ impl Dedup {
 impl Deduplicator for Dedup {
     fn dedup(&mut self, value: Value) -> Value {
         match value {
-            Value::Bytes(bytes) => Value::Bytes(self.dedup_bytes(bytes)),
-            Value::String(bytes) => Value::String(self.dedup_bytes(bytes)),
+            Value::Bytes(v) => Value::Bytes(self.dedup_blob(v)),
+            Value::String(v) => Value::String(self.dedup_string(v)),
             Value::Seq(elements) => {
                 let elements = Arc::new(self.dedup_value_vec(elements.as_ref().clone()));
                 Value::Seq(self.dedup_seq(elements))
@@ -132,8 +142,32 @@ impl Deduplicator for Dedup {
 
 impl Display for Dedup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "vectors:{}", DisplayableVec(&self.vectors.iter().map(|x| DisplayableVec(x)).collect()))?;
-        writeln!(f, "objects:{}", DisplayableVec(&self.objects.iter().map(|x| DisplayableMap(&x.0, &x.1)).collect()))
+        writeln!(
+            f,
+            "blobs:{}",
+            DisplayableVec(&self.blobs.iter().map(|x| DisplayableBlob(x)).collect())
+        )?;
+        writeln!(
+            f,
+            "strings:{}",
+            DisplayableVec(&self.strings.iter().collect())
+        )?;
+        writeln!(
+            f,
+            "vectors:{}",
+            DisplayableVec(&self.vectors.iter().map(|x| DisplayableVec(x)).collect())
+        )?;
+        writeln!(
+            f,
+            "objects:{}",
+            DisplayableVec(
+                &self
+                    .objects
+                    .iter()
+                    .map(|x| DisplayableMap(&x.0, &x.1))
+                    .collect()
+            )
+        )
     }
 }
 
@@ -165,11 +199,23 @@ impl Value {
     }
 
     fn string(value: String) -> Value {
-        Value::String(Arc::new(value.into_bytes()))
+        Value::String(Arc::new(value))
     }
 
     fn bytes(value: Vec<u8>) -> Value {
         Value::Bytes(Arc::new(value))
+    }
+}
+
+struct DisplayableBlob<'a>(&'a Vec<u8>);
+
+impl Display for DisplayableBlob<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0 {
+            // Decide if you want to pad out the value here
+            write!(f, "{:X} ", byte)?;
+        }
+        Ok(())
     }
 }
 
@@ -219,7 +265,7 @@ impl Display for Value {
             Value::F32(v) => write!(f, "{}", v),
             Value::F64(v) => write!(f, "{}", v),
             Value::Char(v) => write!(f, "{}", v),
-            Value::String(ref v) => write!(f, "{}", std::str::from_utf8(v.as_ref()).unwrap()),
+            Value::String(ref v) => write!(f, "{}", v),
             Value::Bytes(ref v) => write!(f, "{:?}", v),
             Value::Option(ref v) => v
                 .clone()
@@ -355,7 +401,7 @@ impl Value {
             Value::F32(n) => serde::de::Unexpected::Float(n as f64),
             Value::F64(n) => serde::de::Unexpected::Float(n),
             Value::Char(c) => serde::de::Unexpected::Char(c),
-            Value::String(ref s) => serde::de::Unexpected::Str(std::str::from_utf8(s).unwrap()),
+            Value::String(ref s) => serde::de::Unexpected::Str(s),
             Value::Unit => serde::de::Unexpected::Unit,
             Value::Option(_) => serde::de::Unexpected::Option,
             Value::Newtype(_) => serde::de::Unexpected::NewtypeStruct,
