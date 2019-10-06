@@ -48,7 +48,16 @@ pub enum Value {
     Bytes(Arc<Vec<u8>>),
 
     Seq(Arc<Vec<Value>>),
-    Map(Arc<BTreeMap<Value, Value>>),
+    Map(Arc<KV>),
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct KV(Vec<Value>, Vec<Value>);
+
+impl KV {
+    fn as_map(self) -> BTreeMap<Value, Value> {
+        self.0.into_iter().zip(self.1.into_iter()).collect()
+    }
 }
 
 impl Value {
@@ -57,7 +66,9 @@ impl Value {
     }
 
     fn map(value: BTreeMap<Value, Value>) -> Value {
-        Value::Map(Arc::new(value))
+        let keys: Vec<Value> = value.keys().cloned().collect();
+        let values: Vec<Value> = value.values().cloned().collect();
+        Value::Map(Arc::new(KV(keys, values)))
     }
 
     fn string(value: String) -> Value {

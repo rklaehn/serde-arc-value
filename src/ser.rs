@@ -52,7 +52,7 @@ impl ser::Serialize for Value {
             Value::Option(Some(ref v)) => s.serialize_some(v),
             Value::Newtype(ref v) => s.serialize_newtype_struct("", v),
             Value::Seq(ref v) => v.serialize(s),
-            Value::Map(ref v) => v.serialize(s),
+            Value::Map(ref v) => v.as_ref().clone().as_map().serialize(s),
             Value::Bytes(ref v) => s.serialize_bytes(v),
         }
     }
@@ -370,7 +370,7 @@ impl ser::SerializeMap for SerializeMap {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Map(Arc::new(self.map)))
+        Ok(Value::map(self.map))
     }
 }
 
@@ -395,7 +395,7 @@ impl ser::SerializeStruct for SerializeStruct {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Map(Arc::new(self.0)))
+        Ok(Value::map(self.0))
     }
 }
 
@@ -420,6 +420,6 @@ impl ser::SerializeStructVariant for SerializeStructVariant {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Map(Arc::new(self.0)))
+        Ok(Value::map(self.0))
     }
 }
