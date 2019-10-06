@@ -52,11 +52,14 @@ pub enum Value {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct KV(Vec<Value>, Vec<Value>);
+pub struct KV(Arc<Vec<Value>>, Vec<Value>);
 
 impl KV {
-    fn as_map(self) -> BTreeMap<Value, Value> {
-        self.0.into_iter().zip(self.1.into_iter()).collect()
+    fn iter(&self) -> impl Iterator<Item = (Value, Value)> {
+        self.0.as_ref().clone().into_iter().zip(self.1.clone().into_iter())
+    }
+    fn as_map(&self) -> BTreeMap<Value, Value> {
+        self.iter().collect()
     }
 }
 
@@ -68,7 +71,7 @@ impl Value {
     fn map(value: BTreeMap<Value, Value>) -> Value {
         let keys: Vec<Value> = value.keys().cloned().collect();
         let values: Vec<Value> = value.values().cloned().collect();
-        Value::Map(Arc::new(KV(keys, values)))
+        Value::Map(Arc::new(KV(Arc::new(keys), values)))
     }
 
     fn string(value: String) -> Value {

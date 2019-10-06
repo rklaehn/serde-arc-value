@@ -350,7 +350,7 @@ impl<'de, E> de::Deserializer<'de> for ValueDeserializer<E> where E: de::Error {
                 visitor.visit_seq(de::value::SeqDeserializer::new(v.as_ref().clone().into_iter().map(ValueDeserializer::new)))
             },
             Value::Map(v) => {
-                visitor.visit_map(de::value::MapDeserializer::new(v.as_ref().clone().as_map().into_iter().map(|(k, v)| (
+                visitor.visit_map(de::value::MapDeserializer::new(v.iter().map(|(k, v)| (
                     ValueDeserializer::new(k),
                     ValueDeserializer::new(v),
                 ))))
@@ -374,7 +374,7 @@ impl<'de, E> de::Deserializer<'de> for ValueDeserializer<E> where E: de::Error {
                                              -> Result<V::Value, Self::Error> {
         let (variant, value) = match self.value {
             Value::Map(value) => {
-                let mut iter = value.as_ref().clone().as_map().into_iter();
+                let mut iter = value.iter();
                 let (variant, value) = match iter.next() {
                     Some(v) => v,
                     None => {
@@ -529,7 +529,7 @@ impl<'de, E> de::VariantAccess<'de> for VariantDeserializer<E> where E: de::Erro
         match self.value {
             Some(Value::Map(v)) => {
                 de::Deserializer::deserialize_any(
-                    de::value::MapDeserializer::new(v.as_ref().clone().as_map().into_iter().map(|(k, v)| (
+                    de::value::MapDeserializer::new(v.iter().map(|(k, v)| (
                         ValueDeserializer::new(k),
                         ValueDeserializer::new(v),
                     ))),

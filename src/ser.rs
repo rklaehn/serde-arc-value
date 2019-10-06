@@ -52,7 +52,7 @@ impl ser::Serialize for Value {
             Value::Option(Some(ref v)) => s.serialize_some(v),
             Value::Newtype(ref v) => s.serialize_newtype_struct("", v),
             Value::Seq(ref v) => v.serialize(s),
-            Value::Map(ref v) => v.as_ref().clone().as_map().serialize(s),
+            Value::Map(ref v) => v.as_ref().as_map().serialize(s),
             Value::Bytes(ref v) => s.serialize_bytes(v),
         }
     }
