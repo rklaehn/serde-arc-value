@@ -6,12 +6,12 @@ extern crate ordered_float;
 #[macro_use]
 extern crate serde_derive;
 
+use ordered_float::OrderedFloat;
+use serde::Deserialize;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
-use serde::Deserialize;
-use ordered_float::OrderedFloat;
 use std::sync::Arc;
 
 pub use de::*;
@@ -55,6 +55,7 @@ pub trait Deduplicator {
     fn dedup(&mut self, value: Value) -> Value;
 }
 
+#[derive(Clone, Debug)]
 struct Dedup {
     strings: HashMap<Arc<Vec<u8>>, Arc<Vec<u8>>>,
     vectors: HashMap<Arc<Vec<Value>>, Arc<Vec<Value>>>,
@@ -70,15 +71,19 @@ impl Dedup {
         }
     }
 
-    fn dedup_bytes(&mut self,bytes: Arc<Vec<u8>>) -> Arc<Vec<u8>> {
+    fn dedup_bytes(&mut self, bytes: Arc<Vec<u8>>) -> Arc<Vec<u8>> {
         self.strings.entry(bytes.clone()).or_insert(bytes).clone()
     }
 
-    fn dedup_seq(&mut self,values: Arc<Vec<Value>>) -> Arc<Vec<Value>> {
+    fn dedup_seq(&mut self, values: Arc<Vec<Value>>) -> Arc<Vec<Value>> {
         self.vectors.entry(values.clone()).or_insert(values).clone()
     }
 
-    fn dedup_map(&mut self,values: Arc<KV>) -> Arc<KV> {
+    fn dedup_value_vec(&mut self, vec: Vec<Value>) -> Vec<Value> {
+        vec.into_iter().map(|x| self.dedup(x)).collect()
+    }
+
+    fn dedup_map(&mut self, values: Arc<KV>) -> Arc<KV> {
         self.objects.entry(values.clone()).or_insert(values).clone()
     }
 }
@@ -88,14 +93,19 @@ impl Deduplicator for Dedup {
         match value {
             Value::Bytes(bytes) => Value::Bytes(self.dedup_bytes(bytes)),
             Value::String(bytes) => Value::String(self.dedup_bytes(bytes)),
-            Value::Seq(elements) => Value::Seq(self.dedup_seq(elements)),
+            Value::Seq(elements) => {
+                let elements = Arc::new(self.dedup_value_vec(elements.as_ref().clone()));
+                Value::Seq(self.dedup_seq(elements))
+            }
             Value::Map(object) => {
                 let KV(k, v) = object.as_ref();
-                let k = self.dedup_seq(k.clone());
-                let object = Arc::new(KV(k, v.clone()));
+                let k = Arc::new(self.dedup_value_vec(k.as_ref().clone()));
+                let v = self.dedup_value_vec(v.clone());
+                let k = self.dedup_seq(k);
+                let object = Arc::new(KV(k, v));
                 Value::Map(self.dedup_map(object))
             }
-            x => x
+            x => x,
         }
     }
 }
@@ -105,7 +115,11 @@ pub struct KV(Arc<Vec<Value>>, Vec<Value>);
 
 impl KV {
     fn iter(&self) -> impl Iterator<Item = (Value, Value)> {
-        self.0.as_ref().clone().into_iter().zip(self.1.clone().into_iter())
+        self.0
+            .as_ref()
+            .clone()
+            .into_iter()
+            .zip(self.1.clone().into_iter())
     }
     fn as_map(&self) -> BTreeMap<Value, Value> {
         self.iter().collect()
@@ -135,7 +149,7 @@ impl Value {
 impl Hash for Value {
     fn hash<H>(&self, hasher: &mut H)
     where
-        H: Hasher
+        H: Hasher,
     {
         self.discriminant().hash(hasher);
         match *self {
@@ -270,7 +284,7 @@ impl Value {
     }
 }
 
-impl Eq for Value { }
+impl Eq for Value {}
 impl PartialOrd for Value {
     fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
         Some(self.cmp(rhs))
@@ -285,12 +299,17 @@ fn de_smoke_test() {
         Value::Char('a'),
         Value::F32(1.0),
         Value::string("hello".into()),
-        Value::map(vec![
-            (Value::Bool(false), Value::Unit),
-            (Value::Bool(true), Value::Newtype(Box::new(
-                Value::bytes(b"hi".as_ref().into())
-            ))),
-        ].into_iter().collect()),
+        Value::map(
+            vec![
+                (Value::Bool(false), Value::Unit),
+                (
+                    Value::Bool(true),
+                    Value::Newtype(Box::new(Value::bytes(b"hi".as_ref().into()))),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ),
     ]))));
 
     // assert that the value remains unchanged through deserialization
@@ -313,11 +332,18 @@ fn ser_smoke_test() {
         c: vec![true, false],
     };
 
-    let expected = Value::map(vec![
-        (Value::string("a".into()), Value::U32(15)),
-        (Value::string("b".into()), Value::string("hello".into())),
-        (Value::string("c".into()), Value::seq(vec![Value::Bool(true), Value::Bool(false)])),
-    ].into_iter().collect());
+    let expected = Value::map(
+        vec![
+            (Value::string("a".into()), Value::U32(15)),
+            (Value::string("b".into()), Value::string("hello".into())),
+            (
+                Value::string("c".into()),
+                Value::seq(vec![Value::Bool(true), Value::Bool(false)]),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
 
     let value = to_value(&foo).unwrap();
     assert_eq!(expected, value);
@@ -334,9 +360,11 @@ fn deserialize_into_enum() {
     let value = Value::string("Bar".into());
     assert_eq!(Foo::deserialize(value).unwrap(), Foo::Bar);
 
-    let value = Value::map(vec![
-        (Value::string("Baz".into()), Value::U8(1))
-    ].into_iter().collect());
+    let value = Value::map(
+        vec![(Value::string("Baz".into()), Value::U8(1))]
+            .into_iter()
+            .collect(),
+    );
     assert_eq!(Foo::deserialize(value).unwrap(), Foo::Baz(1));
 }
 
@@ -349,7 +377,10 @@ fn deserialize_inside_deserialize_impl() {
     }
 
     impl<'de> serde::Deserialize<'de> for Event {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
             #[derive(Deserialize)]
             struct RawEvent {
                 kind: String,
@@ -370,24 +401,45 @@ fn deserialize_inside_deserialize_impl() {
         }
     }
 
-    let input = Value::map(vec![
-        (Value::string("kind".to_owned()), Value::string("ADDED".to_owned())),
-        (Value::string("object".to_owned()), Value::U32(5)),
-    ].into_iter().collect());
+    let input = Value::map(
+        vec![
+            (
+                Value::string("kind".to_owned()),
+                Value::string("ADDED".to_owned()),
+            ),
+            (Value::string("object".to_owned()), Value::U32(5)),
+        ]
+        .into_iter()
+        .collect(),
+    );
     let event = Event::deserialize(input).expect("could not deserialize ADDED event");
     assert_eq!(event, Event::Added(5));
 
-    let input = Value::map(vec![
-        (Value::string("kind".to_owned()), Value::string("ERROR".to_owned())),
-        (Value::string("object".to_owned()), Value::U8(5)),
-    ].into_iter().collect());
+    let input = Value::map(
+        vec![
+            (
+                Value::string("kind".to_owned()),
+                Value::string("ERROR".to_owned()),
+            ),
+            (Value::string("object".to_owned()), Value::U8(5)),
+        ]
+        .into_iter()
+        .collect(),
+    );
     let event = Event::deserialize(input).expect("could not deserialize ERROR event");
     assert_eq!(event, Event::Error(5));
 
-    let input = Value::map(vec![
-        (Value::string("kind".to_owned()), Value::string("ADDED".to_owned())),
-        (Value::string("object".to_owned()), Value::Unit),
-    ].into_iter().collect());
+    let input = Value::map(
+        vec![
+            (
+                Value::string("kind".to_owned()),
+                Value::string("ADDED".to_owned()),
+            ),
+            (Value::string("object".to_owned()), Value::Unit),
+        ]
+        .into_iter()
+        .collect(),
+    );
     let _ = Event::deserialize(input).expect_err("expected deserializing bad ADDED event to fail");
 }
 
@@ -411,9 +463,34 @@ fn deserialize_newtype2() {
         foo: Foo,
     }
 
-    let input = Value::map(vec![
-        (Value::string("foo".to_owned()), Value::I32(5))
-    ].into_iter().collect());
+    let input = Value::map(
+        vec![(Value::string("foo".to_owned()), Value::I32(5))]
+            .into_iter()
+            .collect(),
+    );
     let bar = Bar::deserialize(input).unwrap();
     assert_eq!(bar, Bar { foo: Foo(5) });
+}
+
+#[test]
+fn dedup_test() {
+    let input = Value::seq(vec![
+        Value::string("a".to_owned()),
+        Value::string("a".to_owned()),
+    ]);
+    let mut dedup = Dedup::new();
+    let result = dedup.dedup(input);
+    if let Value::Seq(x) = result {
+        if let Value::String(ref a) = x[0] {
+            if let Value::String(ref b) = x[1] {
+                assert!(Arc::ptr_eq(a, b));
+            } else {
+                panic!();
+            }
+        } else {
+            panic!();
+        }
+    } else {
+        panic!();
+    }
 }
