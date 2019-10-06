@@ -74,11 +74,11 @@ impl Dedup {
         self.strings.entry(bytes.clone()).or_insert(bytes).clone()
     }
 
-    fn dedup_values(&mut self,values: Arc<Vec<Value>>) -> Arc<Vec<Value>> {
+    fn dedup_seq(&mut self,values: Arc<Vec<Value>>) -> Arc<Vec<Value>> {
         self.vectors.entry(values.clone()).or_insert(values).clone()
     }
 
-    fn dedup_object(&mut self,values: Arc<KV>) -> Arc<KV> {
+    fn dedup_map(&mut self,values: Arc<KV>) -> Arc<KV> {
         self.objects.entry(values.clone()).or_insert(values).clone()
     }
 }
@@ -88,12 +88,12 @@ impl Deduplicator for Dedup {
         match value {
             Value::Bytes(bytes) => Value::Bytes(self.dedup_bytes(bytes)),
             Value::String(bytes) => Value::String(self.dedup_bytes(bytes)),
-            Value::Seq(elements) => Value::Seq(self.dedup_values(elements)),
+            Value::Seq(elements) => Value::Seq(self.dedup_seq(elements)),
             Value::Map(object) => {
                 let KV(k, v) = object.as_ref();
-                let k = self.dedup_values(k.clone());
+                let k = self.dedup_seq(k.clone());
                 let object = Arc::new(KV(k, v.clone()));
-                Value::Map(self.dedup_object(object))
+                Value::Map(self.dedup_map(object))
             }
             x => x
         }
