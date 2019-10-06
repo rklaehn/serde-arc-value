@@ -46,7 +46,7 @@ impl ser::Serialize for Value {
             Value::F32(v) => s.serialize_f32(v),
             Value::F64(v) => s.serialize_f64(v),
             Value::Char(v) => s.serialize_char(v),
-            Value::String(ref v) => s.serialize_str(v),
+            Value::String(ref v) => s.serialize_str(std::str::from_utf8(v).unwrap()),
             Value::Unit => s.serialize_unit(),
             Value::Option(None) => s.serialize_none(),
             Value::Option(Some(ref v)) => s.serialize_some(v),

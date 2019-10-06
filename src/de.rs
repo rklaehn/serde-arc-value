@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use Value;
 
@@ -97,15 +96,15 @@ impl de::Error for DeserializerError {
         DeserializerError::Custom(msg.to_string())
     }
 
-    fn invalid_type(unexp: de::Unexpected, exp: &de::Expected) -> Self {
+    fn invalid_type(unexp: de::Unexpected, exp: &dyn de::Expected) -> Self {
         DeserializerError::InvalidType(unexp.into(), exp.to_string())
     }
 
-    fn invalid_value(unexp: de::Unexpected, exp: &de::Expected) -> Self {
+    fn invalid_value(unexp: de::Unexpected, exp: &dyn de::Expected) -> Self {
         DeserializerError::InvalidValue(unexp.into(), exp.to_string())
     }
 
-    fn invalid_length(len: usize, exp: &de::Expected) -> Self {
+    fn invalid_length(len: usize, exp: &dyn de::Expected) -> Self {
         DeserializerError::InvalidLength(len, exp.to_string())
     }
 
@@ -341,13 +340,13 @@ impl<'de, E> de::Deserializer<'de> for ValueDeserializer<E> where E: de::Error {
             Value::F32(v) => visitor.visit_f32(v),
             Value::F64(v) => visitor.visit_f64(v),
             Value::Char(v) => visitor.visit_char(v),
-            Value::String(v) => visitor.visit_string(v.as_ref().clone()),
+            Value::String(v) => visitor.visit_str(std::str::from_utf8(v.as_ref().as_ref()).unwrap()),
             Value::Unit => visitor.visit_unit(),
             Value::Option(None) => visitor.visit_none(),
             Value::Option(Some(v)) => visitor.visit_some(ValueDeserializer::new(*v)),
             Value::Newtype(v) => visitor.visit_newtype_struct(ValueDeserializer::new(*v)),
             Value::Seq(v) => {
-                visitor.visit_seq(de::value::SeqDeserializer::new(v.as_ref().clone().into_iter().map(ValueDeserializer::new)))
+                visitor.visit_seq(de::value::SeqDeserializer::new(v.as_ref().iter().cloned().map(ValueDeserializer::new)))
             },
             Value::Map(v) => {
                 visitor.visit_map(de::value::MapDeserializer::new(v.iter().map(|(k, v)| (
@@ -355,7 +354,7 @@ impl<'de, E> de::Deserializer<'de> for ValueDeserializer<E> where E: de::Error {
                     ValueDeserializer::new(v),
                 ))))
             },
-            Value::Bytes(v) => visitor.visit_byte_buf(v.as_ref().clone()),
+            Value::Bytes(v) => visitor.visit_bytes(v.as_ref().as_ref()),
         }
     }
 

@@ -1,5 +1,3 @@
-#![doc(html_root_url="https://arcnmx.github.io/serde-value")]
-
 #[macro_use]
 extern crate serde;
 extern crate ordered_float;
@@ -9,6 +7,7 @@ extern crate ordered_float;
 extern crate serde_derive;
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use serde::Deserialize;
@@ -23,6 +22,8 @@ mod ser;
 
 #[derive(Clone, Debug)]
 pub enum Value {
+    Unit,
+
     Bool(bool),
 
     U8(u8),
@@ -40,15 +41,63 @@ pub enum Value {
 
     Char(char),
 
-    Unit,
     Option(Option<Box<Value>>),
     Newtype(Box<Value>),
 
-    String(Arc<String>),
+    // complex, possibly shared, values
+    String(Arc<Vec<u8>>),
     Bytes(Arc<Vec<u8>>),
-
     Seq(Arc<Vec<Value>>),
     Map(Arc<KV>),
+}
+
+pub trait Deduplicator {
+    fn dedup(&mut self, value: Value) -> Value;
+}
+
+struct Dedup {
+    strings: HashMap<Arc<Vec<u8>>, Arc<Vec<u8>>>,
+    vectors: HashMap<Arc<Vec<Value>>, Arc<Vec<Value>>>,
+    objects: HashMap<Arc<KV>, Arc<KV>>,
+}
+
+impl Dedup {
+    pub fn new() -> Dedup {
+        Dedup {
+            strings: HashMap::new(),
+            vectors: HashMap::new(),
+            objects: HashMap::new(),
+        }
+    }
+
+    fn dedup_bytes(&mut self,bytes: Arc<Vec<u8>>) -> Arc<Vec<u8>> {
+        self.strings.entry(bytes.clone()).or_insert(bytes).clone()
+    }
+
+    fn dedup_values(&mut self,values: Arc<Vec<Value>>) -> Arc<Vec<Value>> {
+        self.vectors.entry(values.clone()).or_insert(values).clone()
+    }
+
+    fn dedup_object(&mut self,values: Arc<KV>) -> Arc<KV> {
+        self.objects.entry(values.clone()).or_insert(values).clone()
+    }
+}
+
+impl Deduplicator for Dedup {
+    fn dedup(&mut self, value: Value) -> Value {
+        match value {
+            Value::Bytes(bytes) => Value::Bytes(self.dedup_bytes(bytes)),
+            Value::String(bytes) => Value::String(self.dedup_bytes(bytes)),
+            Value::Seq(elements) => Value::Seq(self.dedup_values(elements)),
+            Value::Map(object) => {
+                let KV(k, v) = object.as_ref();
+                let k = self.dedup_values(k.clone());
+                let object = Arc::new(KV(k, v.clone()));
+                Value::Map(self.dedup_object(object))
+            }
+            x => x
+        }
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -75,7 +124,7 @@ impl Value {
     }
 
     fn string(value: String) -> Value {
-        Value::String(Arc::new(value))
+        Value::String(Arc::new(value.into_bytes()))
     }
 
     fn bytes(value: Vec<u8>) -> Value {
@@ -206,7 +255,7 @@ impl Value {
             Value::F32(n) => serde::de::Unexpected::Float(n as f64),
             Value::F64(n) => serde::de::Unexpected::Float(n),
             Value::Char(c) => serde::de::Unexpected::Char(c),
-            Value::String(ref s) => serde::de::Unexpected::Str(s),
+            Value::String(ref s) => serde::de::Unexpected::Str(std::str::from_utf8(s).unwrap()),
             Value::Unit => serde::de::Unexpected::Unit,
             Value::Option(_) => serde::de::Unexpected::Option,
             Value::Newtype(_) => serde::de::Unexpected::NewtypeStruct,
