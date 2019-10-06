@@ -124,11 +124,11 @@ impl ser::Serializer for Serializer {
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::String(v.to_string()))
+        Ok(Value::string(v.to_string()))
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Bytes(v.to_vec()))
+        Ok(Value::bytes(v.to_vec()))
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
@@ -388,7 +388,7 @@ impl ser::SerializeStruct for SerializeStruct {
     where
         T: ser::Serialize
     {
-        let key = Value::String(key.to_string());
+        let key = Value::string(key.to_string());
         let value = value.serialize(Serializer)?;
         self.0.insert(key, value);
         Ok(())
@@ -413,7 +413,7 @@ impl ser::SerializeStructVariant for SerializeStructVariant {
     where
         T: ser::Serialize
     {
-        let key = Value::String(key.to_string());
+        let key = Value::string(key.to_string());
         let value = value.serialize(Serializer)?;
         self.0.insert(key, value);
         Ok(())

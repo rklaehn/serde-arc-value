@@ -244,11 +244,11 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Value, E> {
-        Ok(Value::String(value.into()))
+        Ok(Value::string(value.into()))
     }
 
     fn visit_string<E>(self, value: String) -> Result<Value, E> {
-        Ok(Value::String(value))
+        Ok(Value::string(value))
     }
 
     fn visit_unit<E>(self) -> Result<Value, E> {
@@ -284,11 +284,11 @@ impl<'de> de::Visitor<'de> for ValueVisitor {
     }
 
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Value, E> {
-        Ok(Value::Bytes(v.into()))
+        Ok(Value::bytes(v.into()))
     }
 
     fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Value, E> {
-        Ok(Value::Bytes(v))
+        Ok(Value::bytes(v))
     }
 }
 
@@ -341,7 +341,7 @@ impl<'de, E> de::Deserializer<'de> for ValueDeserializer<E> where E: de::Error {
             Value::F32(v) => visitor.visit_f32(v),
             Value::F64(v) => visitor.visit_f64(v),
             Value::Char(v) => visitor.visit_char(v),
-            Value::String(v) => visitor.visit_string(v),
+            Value::String(v) => visitor.visit_string(v.as_ref().clone()),
             Value::Unit => visitor.visit_unit(),
             Value::Option(None) => visitor.visit_none(),
             Value::Option(Some(v)) => visitor.visit_some(ValueDeserializer::new(*v)),
@@ -355,7 +355,7 @@ impl<'de, E> de::Deserializer<'de> for ValueDeserializer<E> where E: de::Error {
                     ValueDeserializer::new(v),
                 ))))
             },
-            Value::Bytes(v) => visitor.visit_byte_buf(v),
+            Value::Bytes(v) => visitor.visit_byte_buf(v.as_ref().clone()),
         }
     }
 
