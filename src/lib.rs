@@ -9,8 +9,8 @@ extern crate serde_derive;
 use ordered_float::OrderedFloat;
 use serde::Deserialize;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashSet};
+use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -56,35 +56,55 @@ pub trait Deduplicator {
 }
 
 #[derive(Clone, Debug)]
-struct Dedup {
-    strings: HashMap<Arc<Vec<u8>>, Arc<Vec<u8>>>,
-    vectors: HashMap<Arc<Vec<Value>>, Arc<Vec<Value>>>,
-    objects: HashMap<Arc<KV>, Arc<KV>>,
+pub struct Dedup {
+    blobs: HashSet<Arc<Vec<u8>>>,
+    strings: HashSet<Arc<Vec<u8>>>,
+    vectors: HashSet<Arc<Vec<Value>>>,
+    objects: HashSet<Arc<KV>>,
 }
 
 impl Dedup {
     pub fn new() -> Dedup {
         Dedup {
-            strings: HashMap::new(),
-            vectors: HashMap::new(),
-            objects: HashMap::new(),
+            blobs: HashSet::new(),
+            strings: HashSet::new(),
+            vectors: HashSet::new(),
+            objects: HashSet::new(),
         }
-    }
-
-    fn dedup_bytes(&mut self, bytes: Arc<Vec<u8>>) -> Arc<Vec<u8>> {
-        self.strings.entry(bytes.clone()).or_insert(bytes).clone()
-    }
-
-    fn dedup_seq(&mut self, values: Arc<Vec<Value>>) -> Arc<Vec<Value>> {
-        self.vectors.entry(values.clone()).or_insert(values).clone()
     }
 
     fn dedup_value_vec(&mut self, vec: Vec<Value>) -> Vec<Value> {
         vec.into_iter().map(|x| self.dedup(x)).collect()
     }
 
-    fn dedup_map(&mut self, values: Arc<KV>) -> Arc<KV> {
-        self.objects.entry(values.clone()).or_insert(values).clone()
+    fn dedup_bytes(&mut self, value: Arc<Vec<u8>>) -> Arc<Vec<u8>> {
+        match self.strings.get(value.as_ref()) {
+            Some(value) => value.clone(),
+            None => {
+                self.strings.insert(value.clone());
+                value
+            }
+        }
+    }
+
+    fn dedup_seq(&mut self, value: Arc<Vec<Value>>) -> Arc<Vec<Value>> {
+        match self.vectors.get(value.as_ref()) {
+            Some(value) => value.clone(),
+            None => {
+                self.vectors.insert(value.clone());
+                value
+            }
+        }
+    }
+
+    fn dedup_map(&mut self, value: Arc<KV>) -> Arc<KV> {
+        match self.objects.get(value.as_ref()) {
+            Some(value) => value.clone(),
+            None => {
+                self.objects.insert(value.clone());
+                value
+            }
+        }
     }
 }
 
@@ -107,6 +127,13 @@ impl Deduplicator for Dedup {
             }
             x => x,
         }
+    }
+}
+
+impl Display for Dedup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "vectors:{}", DisplayableVec(&self.vectors.iter().map(|x| DisplayableVec(x)).collect()))?;
+        writeln!(f, "objects:{}", DisplayableVec(&self.objects.iter().map(|x| DisplayableMap(&x.0, &x.1)).collect()))
     }
 }
 
@@ -143,6 +170,65 @@ impl Value {
 
     fn bytes(value: Vec<u8>) -> Value {
         Value::Bytes(Arc::new(value))
+    }
+}
+
+struct DisplayableVec<'a, T>(&'a Vec<T>);
+
+impl<T: Display> Display for DisplayableVec<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for (i, elem) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{}", elem)?;
+        }
+        write!(f, "]")
+    }
+}
+
+struct DisplayableMap<'a, K, V>(&'a Vec<K>, &'a Vec<V>);
+
+impl<K: Display, V: Display> Display for DisplayableMap<'_, K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{")?;
+        for (i, (k, v)) in self.0.iter().zip(self.1.iter()).enumerate() {
+            if i > 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{}:{}", k, v)?;
+        }
+        write!(f, "}}")
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Value::Unit => write!(f, "()"),
+            Value::Bool(v) => write!(f, "{}", v),
+            Value::U8(v) => write!(f, "{}", v),
+            Value::U16(v) => write!(f, "{}", v),
+            Value::U32(v) => write!(f, "{}", v),
+            Value::U64(v) => write!(f, "{}", v),
+            Value::I8(v) => write!(f, "{}", v),
+            Value::I16(v) => write!(f, "{}", v),
+            Value::I32(v) => write!(f, "{}", v),
+            Value::I64(v) => write!(f, "{}", v),
+            Value::F32(v) => write!(f, "{}", v),
+            Value::F64(v) => write!(f, "{}", v),
+            Value::Char(v) => write!(f, "{}", v),
+            Value::String(ref v) => write!(f, "{}", std::str::from_utf8(v.as_ref()).unwrap()),
+            Value::Bytes(ref v) => write!(f, "{:?}", v),
+            Value::Option(ref v) => v
+                .clone()
+                .map(|v| write!(f, "Some({})", v))
+                .unwrap_or_else(|| write!(f, "None")),
+            Value::Newtype(ref v) => write!(f, "{}", v),
+            Value::Seq(ref v) => write!(f, "{}", DisplayableVec(v)),
+            Value::Map(ref v) => write!(f, "{}", DisplayableMap(&v.0, &v.1)),
+        }
     }
 }
 
@@ -472,25 +558,59 @@ fn deserialize_newtype2() {
     assert_eq!(bar, Bar { foo: Foo(5) });
 }
 
-#[test]
-fn dedup_test() {
-    let input = Value::seq(vec![
-        Value::string("a".to_owned()),
-        Value::string("a".to_owned()),
-    ]);
-    let mut dedup = Dedup::new();
-    let result = dedup.dedup(input);
-    if let Value::Seq(x) = result {
-        if let Value::String(ref a) = x[0] {
-            if let Value::String(ref b) = x[1] {
-                assert!(Arc::ptr_eq(a, b));
+#[cfg(test)]
+mod dedup_tests {
+    extern crate serde_json;
+
+    use self::serde_json::json;
+    use super::*;
+
+    #[test]
+    fn dedup_simple() {
+        let input = Value::seq(vec![
+            Value::string("a".to_owned()),
+            Value::string("a".to_owned()),
+        ]);
+        let mut dedup = Dedup::new();
+        let result = dedup.dedup(input);
+        if let Value::Seq(x) = result {
+            if let Value::String(ref a) = x[0] {
+                if let Value::String(ref b) = x[1] {
+                    assert!(Arc::ptr_eq(a, b));
+                } else {
+                    panic!();
+                }
             } else {
                 panic!();
             }
         } else {
             panic!();
         }
-    } else {
-        panic!();
+    }
+
+    #[test]
+    fn dedup_record() {
+        let input = json!(
+            [{ "x": 0, "y":0},{ "x": 0, "y":1},{ "x": 1, "y":1},{ "x": 1, "y":0}]
+        );
+        let value: Value = to_value(input).unwrap();
+        let mut dedup = Dedup::new();
+        let result = dedup.dedup(value);
+        println!("{}", dedup);
+        println!("{}", result);
+
+        if let Value::Seq(x) = result {
+            if let Value::Map(ref a) = x[0] {
+                if let Value::Map(ref b) = x[1] {
+                    assert!(Arc::ptr_eq(&a.as_ref().0, &b.as_ref().0));
+                } else {
+                    panic!();
+                }
+            } else {
+                panic!();
+            }
+        } else {
+            panic!();
+        }
     }
 }
