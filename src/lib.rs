@@ -73,6 +73,37 @@ impl Dedup {
         }
     }
 
+    fn strings(&self) -> Vec<(String, usize)> {
+        self.strings.iter().cloned().map(|x| (x.as_ref().clone(), Arc::strong_count(&x))).collect()
+    }
+
+    fn objects(&self) -> Vec<(KV, usize)> {
+        self.objects.iter().cloned().map(|x| (x.as_ref().clone(), Arc::strong_count(&x))).collect()
+    }
+
+    fn vectors(&self) -> Vec<(Vec<Value>, usize)> {
+        self.vectors.iter().cloned().map(|x| (x.as_ref().clone(), Arc::strong_count(&x))).collect()
+    }
+
+    fn size(&self) -> usize {
+        let mut res: usize = 0;
+        for blob in self.blobs.iter() {
+            res += blob.len();
+        }
+        for string in self.strings.iter() {
+            res += string.len();
+        }
+        for vector in self.vectors.iter() {
+            res += vector.len() * std::mem::size_of::<Value>();
+        }
+        for object in self.objects.iter() {
+            res += std::mem::size_of::<KV>();
+            let KV(_,v) = object.as_ref();
+            res += v.len() * std::mem::size_of::<Value>();
+        }
+        res
+    }
+
     fn dedup_value_vec(&mut self, vec: Vec<Value>) -> Vec<Value> {
         vec.into_iter().map(|x| self.dedup(x)).collect()
     }
@@ -142,20 +173,40 @@ impl Deduplicator for Dedup {
 
 impl Display for Dedup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
-            f,
-            "blobs:{}",
-            DisplayableVec(&self.blobs.iter().map(|x| DisplayableBlob(x)).collect())
-        )?;
+        // writeln!(
+        //     f,
+        //     "blobs:{}",
+        //     DisplayableVec(
+        //         &self
+        //             .blobs
+        //             .iter()
+        //             .map(|x| format!("{}:{}", DisplayableBlob(x), Arc::strong_count(x)))
+        //             .collect()
+        //     )
+        // )?;
         writeln!(
             f,
             "strings:{}",
-            DisplayableVec(&self.strings.iter().collect())
+            DisplayableVec(
+                &self
+                    .strings
+                    .iter()
+                    .filter(|x| Arc::strong_count(x) > 100)
+                    .map(|x| format!("{}:{}\n", x, Arc::strong_count(x)))
+                    .collect()
+            )
         )?;
         writeln!(
             f,
             "vectors:{}",
-            DisplayableVec(&self.vectors.iter().map(|x| DisplayableVec(x)).collect())
+            DisplayableVec(
+                &self
+                    .vectors
+                    .iter()
+                    .filter(|x| Arc::strong_count(x) > 100)
+                    .map(|x| format!("{}:{}\n", DisplayableVec(x), Arc::strong_count(x)))
+                    .collect()
+            )
         )?;
         writeln!(
             f,
@@ -164,7 +215,8 @@ impl Display for Dedup {
                 &self
                     .objects
                     .iter()
-                    .map(|x| DisplayableMap(&x.0, &x.1))
+                    .filter(|x| Arc::strong_count(x) > 100)
+                    .map(|x| format!("{}:{}\n", DisplayableMap(&x.0, &x.1), Arc::strong_count(x)))
                     .collect()
             )
         )
@@ -311,25 +363,25 @@ impl Hash for Value {
 impl PartialEq for Value {
     fn eq(&self, rhs: &Self) -> bool {
         match (self, rhs) {
-            (&Value::Bool(v0), &Value::Bool(v1)) if v0 == v1 => true,
-            (&Value::U8(v0), &Value::U8(v1)) if v0 == v1 => true,
-            (&Value::U16(v0), &Value::U16(v1)) if v0 == v1 => true,
-            (&Value::U32(v0), &Value::U32(v1)) if v0 == v1 => true,
-            (&Value::U64(v0), &Value::U64(v1)) if v0 == v1 => true,
-            (&Value::I8(v0), &Value::I8(v1)) if v0 == v1 => true,
-            (&Value::I16(v0), &Value::I16(v1)) if v0 == v1 => true,
-            (&Value::I32(v0), &Value::I32(v1)) if v0 == v1 => true,
-            (&Value::I64(v0), &Value::I64(v1)) if v0 == v1 => true,
-            (&Value::F32(v0), &Value::F32(v1)) if OrderedFloat(v0) == OrderedFloat(v1) => true,
-            (&Value::F64(v0), &Value::F64(v1)) if OrderedFloat(v0) == OrderedFloat(v1) => true,
-            (&Value::Char(v0), &Value::Char(v1)) if v0 == v1 => true,
-            (&Value::String(ref v0), &Value::String(ref v1)) if v0 == v1 => true,
+            (&Value::Bool(v0), &Value::Bool(v1)) => v0 == v1,
+            (&Value::U8(v0), &Value::U8(v1)) => v0 == v1,
+            (&Value::U16(v0), &Value::U16(v1)) => v0 == v1,
+            (&Value::U32(v0), &Value::U32(v1)) => v0 == v1,
+            (&Value::U64(v0), &Value::U64(v1)) => v0 == v1,
+            (&Value::I8(v0), &Value::I8(v1)) => v0 == v1,
+            (&Value::I16(v0), &Value::I16(v1)) => v0 == v1,
+            (&Value::I32(v0), &Value::I32(v1)) => v0 == v1,
+            (&Value::I64(v0), &Value::I64(v1)) => v0 == v1,
+            (&Value::F32(v0), &Value::F32(v1)) => OrderedFloat(v0) == OrderedFloat(v1),
+            (&Value::F64(v0), &Value::F64(v1)) => OrderedFloat(v0) == OrderedFloat(v1),
+            (&Value::Char(v0), &Value::Char(v1)) => v0 == v1,
+            (&Value::String(ref v0), &Value::String(ref v1)) => v0 == v1,
             (&Value::Unit, &Value::Unit) => true,
-            (&Value::Option(ref v0), &Value::Option(ref v1)) if v0 == v1 => true,
-            (&Value::Newtype(ref v0), &Value::Newtype(ref v1)) if v0 == v1 => true,
-            (&Value::Seq(ref v0), &Value::Seq(ref v1)) if v0 == v1 => true,
-            (&Value::Map(ref v0), &Value::Map(ref v1)) if v0 == v1 => true,
-            (&Value::Bytes(ref v0), &Value::Bytes(ref v1)) if v0 == v1 => true,
+            (&Value::Option(ref v0), &Value::Option(ref v1)) => v0 == v1,
+            (&Value::Newtype(ref v0), &Value::Newtype(ref v1)) => v0 == v1,
+            (&Value::Seq(ref v0), &Value::Seq(ref v1)) => v0 == v1,
+            (&Value::Map(ref v0), &Value::Map(ref v1)) => v0 == v1,
+            (&Value::Bytes(ref v0), &Value::Bytes(ref v1)) => v0 == v1,
             _ => false,
         }
     }
@@ -645,6 +697,10 @@ mod dedup_tests {
         println!("{}", dedup);
         println!("{}", result);
 
+        let mut strings: Vec<&str> = dedup.strings.iter().map(|x| x.as_ref().as_ref()).collect();
+        strings.sort();
+        assert_eq!(strings, vec!["x", "y"]);
+
         if let Value::Seq(x) = result {
             if let Value::Map(ref a) = x[0] {
                 if let Value::Map(ref b) = x[1] {
@@ -659,4 +715,30 @@ mod dedup_tests {
             panic!();
         }
     }
+
+    use std::io::BufRead;
+    #[test]
+    fn dedup_large() {
+        println!("sov {}", std::mem::size_of::<Value>());
+        let f = std::fs::File::open("large.json").unwrap();
+        let f = std::io::BufReader::new(f);
+        let mut dedup = Dedup::new();
+        let lines: Vec<Value> = f.lines().enumerate().map(|(i, x)| {
+            let text = x.unwrap();
+            let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let value = to_value(json).unwrap();
+            let value = dedup.dedup(value);
+            if (i % 1000) == 0 {
+                println!("{}", i);
+            }
+            value
+        }).collect();
+        drop(lines);
+        let mut strings = dedup.strings();
+        strings = strings.iter().cloned().filter(|x| x.1 > 10).collect::<Vec<_>>();
+        strings.sort_by_key(|x| x.1);
+        println!("{:?}", strings);
+        println!("{}", dedup.size());
+//        println!("{}", dedup);
+    }    
 }

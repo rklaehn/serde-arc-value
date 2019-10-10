@@ -5,6 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use Value;
+use KV;
 
 #[derive(Debug)]
 pub enum SerializerError {
@@ -217,8 +218,8 @@ impl ser::Serializer for Serializer {
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         Ok(SerializeMap {
-            map: BTreeMap::new(),
-            key: None,
+            keys: Vec::new(),
+            values: Vec::new(),
         })
     }
 
@@ -322,8 +323,8 @@ impl ser::SerializeTupleVariant for SerializeTupleVariant {
 }
 
 struct SerializeMap {
-    map: BTreeMap<Value, Value>,
-    key: Option<Value>,
+    keys: Vec<Value>,
+    values: Vec<Value>,
 }
 
 impl ser::SerializeMap for SerializeMap {
@@ -335,7 +336,7 @@ impl ser::SerializeMap for SerializeMap {
         T: ser::Serialize,
     {
         let key = key.serialize(Serializer)?;
-        self.key = Some(key);
+        self.keys.push(key);
         Ok(())
     }
 
@@ -344,12 +345,12 @@ impl ser::SerializeMap for SerializeMap {
         T: ser::Serialize,
     {
         let value = value.serialize(Serializer)?;
-        self.map.insert(self.key.take().unwrap(), value);
+        self.values.push(value);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::map(self.map))
+        Ok(Value::Map(Arc::new(KV(Arc::new(self.keys), self.values))))
     }
 }
 
